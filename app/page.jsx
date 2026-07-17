@@ -637,10 +637,10 @@ function Header() {
         </span>
         <div>
           <div className="f-display text-[15px] font-semibold leading-none" style={{ color: C.ink }}>
-            Kovai Oakline Works
+            Pooja Enterprises
           </div>
           <div className="f-body text-[11px] mt-1" style={{ color: C.inkMuted }}>
-            Wednesday, 15 July 2026
+            {currentDate}
           </div>
         </div>
       </div>
