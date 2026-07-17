@@ -626,6 +626,13 @@ function Header() {
   const overdueCount = pendingOrders.filter((o) => o.days >= 15).length;
   const totalDue = moneyChase.reduce((s, m) => s + m.amount, 0);
 
+  const currentDate = new Date().toLocaleDateString("en-IN", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  });
+  
   return (
     <div className="px-5 pt-6 pb-4">
       <div className="flex items-center gap-2 mb-5">
