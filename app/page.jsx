@@ -11,28 +11,22 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { ChevronDown, Ruler, IndianRupee, Trophy, CheckCircle2 } from "lucide-react";
+import { ChevronDown, Ruler, Trophy, CheckCircle2, ChevronRight } from "lucide-react";
 
 /* =================================================================
-   PASTE YOUR SHEETDB URL HERE — the only line you need to edit.
-   Get it from sheetdb.io after connecting your Google Sheet.
-   It looks like: https://sheetdb.io/api/v1/xxxxx
+   PASTE YOUR SHEETDB URL HERE
 ================================================================= */
 const SHEETDB_URL = "https://sheetdb.io/api/v1/2lhcimkjxmeqw";
 
 /* =================================================================
-   YOUR GOOGLE SHEET MUST HAVE EXACTLY THESE 2 TABS
-   (tab names are case-sensitive, must match exactly):
+   GOOGLE SHEET — 2 tabs, exact names:
 
-   Tab "Orders"      → columns: vendor, model, orderdate, status, completeddate
-                        (status = "Pending" or "Completed" — blank counts as
-                        Pending; completeddate only needs filling in once you
-                        mark a row Completed)
-   Tab "Collections" → columns: date, amount, mode, party
+   Tab "Orders"      → vendor, model, orderdate, status, completeddate
+                        dates as dd-mm-yy or dd-mm-yyyy (e.g. 11-7-26)
+   Tab "Collections" → date, amount, mode, party
+                        dates as dd-mm-yy or dd-mm-yyyy
 
-   Column header CASE doesn't matter (Vendor / vendor / VENDOR all
-   work) — the code lowercases everything automatically. Only the
-   two TAB names above need to match exactly.
+   Column header CASE never matters. Tab names must match exactly.
 ================================================================= */
 
 /* ---------------------------------------------------------------
@@ -50,6 +44,7 @@ const C = {
   brick: "#A83B29",
   brickSoft: "#F1DAD3",
   forest: "#3F6B52",
+  forestSoft: "#DEE9DF",
 };
 
 const FontStyles = () => (
@@ -64,21 +59,33 @@ const FontStyles = () => (
 /* ---------------------------------------------------------------
    HELPERS
 --------------------------------------------------------------- */
-const inr = (n) =>
-  new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(n || 0);
+// explicit ₹ prefix — never falls back to $ under any locale
+const inr = (n) => "₹" + new Intl.NumberFormat("en-IN").format(Math.round(n || 0));
 
-// makes every column header lowercase + trimmed, so sheet header
-// casing (Vendor / vendor / VENDOR) never breaks anything
+const toNumber = (v) => Number(String(v ?? "").replace(/[^0-9.-]/g, "")) || 0;
+
 function normalizeRow(row) {
   const out = {};
   Object.keys(row).forEach((k) => {
     out[k.trim().toLowerCase()] = typeof row[k] === "string" ? row[k].trim() : row[k];
   });
   return out;
+}
+
+// reads dates as dd-mm-yy / dd-mm-yyyy (not the US mm-dd-yy default),
+// but still handles yyyy-mm-dd if that's what a cell contains
+function parseSheetDate(str) {
+  if (!str) return new Date(NaN);
+  const parts = String(str).trim().split(/[\/\-.]/);
+  if (parts.length !== 3) return new Date(str);
+  const nums = parts.map((p) => parseInt(p, 10));
+  if (String(parts[0]).length === 4) {
+    const [y, m, d] = nums;
+    return new Date(y, m - 1, d);
+  }
+  let [d, m, y] = nums;
+  if (y < 100) y += 2000;
+  return new Date(y, m - 1, d);
 }
 
 function pendingTone(days) {
@@ -88,14 +95,13 @@ function pendingTone(days) {
 }
 
 function daysBetween(dateStr) {
-  const then = new Date(dateStr);
+  const then = parseSheetDate(dateStr);
   const now = new Date();
   if (isNaN(then)) return 0;
   return Math.max(0, Math.floor((now - then) / 86400000));
 }
 
-function monthKeyOf(dateStr) {
-  const d = new Date(dateStr);
+function monthKeyOfDate(d) {
   if (isNaN(d)) return null;
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
@@ -106,7 +112,7 @@ function monthLabelOf(key) {
 }
 
 /* ---------------------------------------------------------------
-   TICK GAUGE — signature ruler/measuring-tape motif
+   SHARED BITS
 --------------------------------------------------------------- */
 function TickGauge({ days, max = 30, color }) {
   const totalTicks = 12;
@@ -117,24 +123,13 @@ function TickGauge({ days, max = 30, color }) {
         const isMajor = i % 4 === 0;
         const active = i < filled;
         return (
-          <span
-            key={i}
-            style={{
-              width: 2,
-              height: isMajor ? 14 : 8,
-              backgroundColor: active ? color : C.hairline,
-              borderRadius: 1,
-            }}
-          />
+          <span key={i} style={{ width: 2, height: isMajor ? 14 : 8, backgroundColor: active ? color : C.hairline, borderRadius: 1 }} />
         );
       })}
     </div>
   );
 }
 
-/* ---------------------------------------------------------------
-   CHART TOOLTIP
---------------------------------------------------------------- */
 function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   const cash = payload.find((p) => p.dataKey === "cash")?.value ?? 0;
@@ -144,17 +139,11 @@ function ChartTooltip({ active, payload, label }) {
     <div className="rounded-xl px-3 py-2.5 shadow-lg f-body" style={{ backgroundColor: C.ink, color: C.paper, minWidth: 150 }}>
       <div className="text-[11px] uppercase tracking-wide opacity-60 mb-1.5">{label}</div>
       <div className="flex items-center justify-between gap-4 text-[13px] mb-0.5">
-        <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: C.amber }} />
-          Cash
-        </span>
+        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm" style={{ backgroundColor: C.amber }} />Cash</span>
         <span className="f-mono">{inr(cash)}</span>
       </div>
       <div className="flex items-center justify-between gap-4 text-[13px] mb-0.5">
-        <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: C.teal }} />
-          Bank
-        </span>
+        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm" style={{ backgroundColor: C.teal }} />Bank</span>
         <span className="f-mono">{inr(bank)}</span>
       </div>
       {trend !== undefined && (
@@ -171,9 +160,7 @@ function SectionHeader({ eyebrow, title, subtitle, accent, right }) {
   return (
     <div className="flex items-start justify-between mb-4">
       <div>
-        <div className="text-[11px] font-semibold tracking-[0.14em] uppercase f-body mb-1" style={{ color: accent }}>
-          {eyebrow}
-        </div>
+        <div className="text-[11px] font-semibold tracking-[0.14em] uppercase f-body mb-1" style={{ color: accent }}>{eyebrow}</div>
         <h2 className="f-display text-[19px] font-semibold" style={{ color: C.ink }}>{title}</h2>
         {subtitle && <p className="f-body text-[12.5px] mt-0.5" style={{ color: C.inkMuted }}>{subtitle}</p>}
       </div>
@@ -191,15 +178,55 @@ function EmptyCard({ eyebrow, title, accent, message }) {
   );
 }
 
+function LegendPill({ color, label, value }) {
+  return (
+    <div className="text-right">
+      <div className="flex items-center justify-end gap-1.5">
+        <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: color }} />
+        <span className="f-body text-[11px] uppercase tracking-wide" style={{ color: C.inkMuted }}>{label}</span>
+      </div>
+      <div className="f-mono text-[12.5px] font-semibold" style={{ color: C.ink }}>{value}</div>
+    </div>
+  );
+}
+
+/* small reusable dropdown trigger + panel, used by chart + top vendors */
+function Dropdown({ label, accent, children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen((v) => !v)}
+        className="f-body text-[13px] font-semibold flex items-center gap-1 px-3 py-1.5 rounded-lg"
+        style={{ backgroundColor: `${accent}1A`, color: accent }}>
+        {label}
+        <ChevronDown size={14} />
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-1.5 rounded-xl overflow-hidden shadow-lg z-20 f-body"
+          style={{ backgroundColor: C.panel, border: `1px solid ${C.hairline}`, minWidth: 160, maxHeight: 260, overflowY: "auto" }}
+          onClick={() => setOpen(false)}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DropdownItem({ active, accent, onClick, children }) {
+  return (
+    <button onClick={onClick} className="w-full text-left text-[13px] px-3.5 py-2.5 f-body"
+      style={{ color: active ? accent : C.ink, fontWeight: active ? 600 : 400, backgroundColor: active ? `${accent}1A` : "transparent" }}>
+      {children}
+    </button>
+  );
+}
+
 /* ---------------------------------------------------------------
-   1. PENDING ORDERS — from the "Orders" tab
+   1. PENDING ORDERS
 --------------------------------------------------------------- */
 function PendingOrders({ orders }) {
   if (!orders.length) {
-    return (
-      <EmptyCard eyebrow="The Red Zone" title="Pending Orders" accent={C.brick}
-        message="No rows found in the 'Orders' tab of your Google Sheet yet." />
-    );
+    return <EmptyCard eyebrow="The Red Zone" title="Pending Orders" accent={C.brick} message="No rows found in the 'Orders' tab yet." />;
   }
   const avg = Math.round(orders.reduce((s, o) => s + o.days, 0) / orders.length);
   const overdue = orders.filter((o) => o.days >= 15).length;
@@ -230,19 +257,14 @@ function PendingOrders({ orders }) {
 }
 
 /* ---------------------------------------------------------------
-   1b. COMPLETED ORDERS — collapsed by default, shows vendor, model,
-       and completion date once expanded
+   1b. COMPLETED ORDERS — collapsed by default
 --------------------------------------------------------------- */
 function CompletedOrders({ completed }) {
   const [open, setOpen] = useState(false);
   if (!completed.length) return null;
-
   return (
     <section className="rounded-2xl p-5 mb-4" style={{ backgroundColor: C.panel, border: `1px solid ${C.hairline}` }}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between"
-      >
+      <button onClick={() => setOpen((v) => !v)} className="w-full flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <span className="flex items-center justify-center rounded-lg" style={{ width: 30, height: 30, backgroundColor: `${C.forest}1A` }}>
             <CheckCircle2 size={15} color={C.forest} />
@@ -252,13 +274,8 @@ function CompletedOrders({ completed }) {
             <div className="f-body text-[12px]" style={{ color: C.inkMuted }}>{completed.length} finished · tap to {open ? "hide" : "view"}</div>
           </div>
         </div>
-        <ChevronDown
-          size={18}
-          color={C.inkMuted}
-          style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.15s" }}
-        />
+        <ChevronDown size={18} color={C.inkMuted} style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.15s" }} />
       </button>
-
       {open && (
         <div className="flex flex-col mt-3">
           {completed.map((o, i) => (
@@ -277,22 +294,36 @@ function CompletedOrders({ completed }) {
 }
 
 /* ---------------------------------------------------------------
-   2. COLLECTION ENGINE — from the "Collections" tab
+   2. COLLECTION ENGINE — quick presets + calendar months in one dropdown
 --------------------------------------------------------------- */
-function CollectionEngine({ monthsList, monthDataMap }) {
+const QUICK_RANGES = [
+  { key: "3d", label: "Last 3 Days", days: 3 },
+  { key: "7d", label: "Last 7 Days", days: 7 },
+  { key: "30d", label: "Last 30 Days", days: 30 },
+];
+
+function CollectionEngine({ allDays, monthsList }) {
+  const [rangeMode, setRangeMode] = useState("7d"); // '3d' | '7d' | '30d' | 'month'
   const [monthKey, setMonthKey] = useState(monthsList[monthsList.length - 1]?.key);
   const [stacked, setStacked] = useState(true);
-  const [menuOpen, setMenuOpen] = useState(false);
 
-  if (!monthsList.length) {
-    return (
-      <EmptyCard eyebrow="Cash vs Bank" title="Collection Engine" accent={C.teal}
-        message="No rows found in the 'Collections' tab of your Google Sheet yet." />
-    );
+  if (!allDays.length) {
+    return <EmptyCard eyebrow="Cash vs Bank" title="Collection Engine" accent={C.teal} message="No rows found in the 'Collections' tab yet." />;
   }
 
-  const data = monthDataMap[monthKey] || [];
-  const monthLabel = monthsList.find((m) => m.key === monthKey)?.label || "";
+  let data, periodText, triggerLabel;
+  if (rangeMode === "month") {
+    data = allDays.filter((d) => monthKeyOfDate(d.dateObj) === monthKey);
+    const monthLabel = monthsList.find((m) => m.key === monthKey)?.label || "";
+    periodText = monthLabel;
+    triggerLabel = monthLabel.split(" ")[0];
+  } else {
+    const q = QUICK_RANGES.find((r) => r.key === rangeMode);
+    data = allDays.slice(-q.days);
+    periodText = q.label.toLowerCase().replace("last", "the last");
+    triggerLabel = q.label;
+  }
+
   const totalCash = data.reduce((s, r) => s + r.cash, 0);
   const totalBank = data.reduce((s, r) => s + r.bank, 0);
   const grandTotal = totalCash + totalBank;
@@ -303,33 +334,23 @@ function CollectionEngine({ monthsList, monthDataMap }) {
       <SectionHeader
         eyebrow="Cash vs Bank" title="Collection Engine" accent={C.teal}
         right={
-          <div className="relative">
-            <button onClick={() => setMenuOpen((v) => !v)}
-              className="f-body text-[13px] font-semibold flex items-center gap-1 px-3 py-1.5 rounded-lg"
-              style={{ backgroundColor: C.tealSoft, color: C.teal }}>
-              {monthLabel.split(" ")[0]}
-              <ChevronDown size={14} />
-            </button>
-            {menuOpen && (
-              <div className="absolute right-0 mt-1.5 rounded-xl overflow-hidden shadow-lg z-10 f-body"
-                style={{ backgroundColor: C.panel, border: `1px solid ${C.hairline}`, minWidth: 140 }}>
-                {monthsList.map((m) => (
-                  <button key={m.key} onClick={() => { setMonthKey(m.key); setMenuOpen(false); }}
-                    className="w-full text-left text-[13px] px-3.5 py-2.5"
-                    style={{ color: m.key === monthKey ? C.teal : C.ink, fontWeight: m.key === monthKey ? 600 : 400, backgroundColor: m.key === monthKey ? C.tealSoft : "transparent" }}>
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <Dropdown label={triggerLabel} accent={C.teal}>
+            {QUICK_RANGES.map((r) => (
+              <DropdownItem key={r.key} active={rangeMode === r.key} accent={C.teal} onClick={() => setRangeMode(r.key)}>{r.label}</DropdownItem>
+            ))}
+            <div style={{ borderTop: `1px solid ${C.hairline}` }} />
+            {monthsList.map((m) => (
+              <DropdownItem key={m.key} active={rangeMode === "month" && monthKey === m.key} accent={C.teal}
+                onClick={() => { setRangeMode("month"); setMonthKey(m.key); }}>{m.label}</DropdownItem>
+            ))}
+          </Dropdown>
         }
       />
 
       <div className="flex items-end justify-between mb-3 flex-wrap gap-2">
         <div>
           <div className="f-mono text-[24px] font-semibold leading-none" style={{ color: C.ink }}>{inr(grandTotal)}</div>
-          <div className="f-body text-[12px] mt-1" style={{ color: C.inkMuted }}>collected in {monthLabel}</div>
+          <div className="f-body text-[12px] mt-1" style={{ color: C.inkMuted }}>collected in {periodText}</div>
         </div>
         <div className="flex gap-3">
           <LegendPill color={C.amber} label="Cash" value={inr(totalCash)} />
@@ -341,9 +362,7 @@ function CollectionEngine({ monthsList, monthDataMap }) {
         {[{ v: true, label: "Stacked" }, { v: false, label: "Grouped" }].map((opt) => (
           <button key={opt.label} onClick={() => setStacked(opt.v)}
             className="f-body text-[12px] font-semibold px-3 py-1.5 rounded-md transition-colors"
-            style={stacked === opt.v ? { backgroundColor: C.ink, color: C.paper } : { color: C.inkMuted }}>
-            {opt.label}
-          </button>
+            style={stacked === opt.v ? { backgroundColor: C.ink, color: C.paper } : { color: C.inkMuted }}>{opt.label}</button>
         ))}
       </div>
 
@@ -364,71 +383,140 @@ function CollectionEngine({ monthsList, monthDataMap }) {
   );
 }
 
-function LegendPill({ color, label, value }) {
-  return (
-    <div className="text-right">
-      <div className="flex items-center justify-end gap-1.5">
-        <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: color }} />
-        <span className="f-body text-[11px] uppercase tracking-wide" style={{ color: C.inkMuted }}>{label}</span>
-      </div>
-      <div className="f-mono text-[12.5px] font-semibold" style={{ color: C.ink }}>{value}</div>
-    </div>
-  );
-}
-
 /* ---------------------------------------------------------------
-   3. TOP 5 VENDORS — ranked leaderboard by total collected amount,
-      built from the "party" column in the Collections tab
+   3. TOP VENDORS — month filter, cash/bank/both filter, split bar,
+      collapsible "Other Vendors" for rank 6+
 --------------------------------------------------------------- */
-function TopVendors({ vendors }) {
-  if (!vendors.length) {
-    return (
-      <EmptyCard eyebrow="Leaderboard" title="Top 5 Vendors" accent={C.forest}
-        message="No parties found yet — add a 'party' column value to rows in your Collections tab." />
-    );
+function TopVendors({ rows, monthsList }) {
+  const [monthFilter, setMonthFilter] = useState("all");
+  const [modeFilter, setModeFilter] = useState("both"); // both | cash | bank
+  const [showOthers, setShowOthers] = useState(false);
+
+  if (!rows.length) {
+    return <EmptyCard eyebrow="Leaderboard" title="Top Vendors" accent={C.forest} message="No parties found yet in your Collections tab." />;
   }
-  const max = vendors[0]?.total || 1;
+
+  const passesMode = (r) => (modeFilter === "both" ? true : modeFilter === "cash" ? r.isCash : !r.isCash);
+  const filtered = rows.filter((r) => (monthFilter === "all" || r.monthKey === monthFilter) && passesMode(r));
+
+  const byParty = {};
+  filtered.forEach((r) => {
+    if (!byParty[r.party]) byParty[r.party] = { name: r.party, total: 0, cash: 0, bank: 0 };
+    byParty[r.party].total += r.amount;
+    if (r.isCash) byParty[r.party].cash += r.amount;
+    else byParty[r.party].bank += r.amount;
+  });
+  const ranked = Object.values(byParty).sort((a, b) => b.total - a.total);
+  const top5 = ranked.slice(0, 5);
+  const others = ranked.slice(5);
+  const max = top5[0]?.total || 1;
+  const monthLabel = monthFilter === "all" ? "All Time" : monthsList.find((m) => m.key === monthFilter)?.label || "";
 
   return (
     <section className="rounded-2xl p-5 mb-4" style={{ backgroundColor: C.panel, border: `1px solid ${C.hairline}` }}>
-      <SectionHeader eyebrow="Leaderboard" title="Top 5 Vendors" accent={C.forest}
-        subtitle="Ranked by total amount collected" />
-      <div className="flex flex-col gap-3.5">
-        {vendors.map((v, i) => (
-          <div key={i} className="flex items-center gap-3">
-            <span
-              className="f-display text-[13px] font-semibold flex items-center justify-center shrink-0"
-              style={{
-                width: 24, height: 24, borderRadius: 8,
-                backgroundColor: i === 0 ? C.forest : C.paper,
-                color: i === 0 ? C.paper : C.inkMuted,
-                border: i === 0 ? "none" : `1px solid ${C.hairline}`,
-              }}
-            >
-              {i === 0 ? <Trophy size={12} /> : i + 1}
-            </span>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between mb-1">
-                <span className="f-body text-[13.5px] font-semibold truncate" style={{ color: C.ink }}>{v.name}</span>
-                <span className="f-mono text-[12.5px] font-semibold ml-2 shrink-0" style={{ color: C.forest }}>{inr(v.total)}</span>
-              </div>
-              <div className="rounded-full overflow-hidden" style={{ height: 5, backgroundColor: C.hairline }}>
-                <div style={{ width: `${Math.max(6, (v.total / max) * 100)}%`, height: "100%", backgroundColor: C.forest }} />
-              </div>
-            </div>
-          </div>
+      <SectionHeader
+        eyebrow="Leaderboard" title="Top Vendors" accent={C.forest}
+        subtitle={`Ranked by amount · ${monthLabel}`}
+        right={
+          <Dropdown label={monthFilter === "all" ? "All Time" : monthLabel.split(" ")[0]} accent={C.forest}>
+            <DropdownItem active={monthFilter === "all"} accent={C.forest} onClick={() => setMonthFilter("all")}>All Time</DropdownItem>
+            <div style={{ borderTop: `1px solid ${C.hairline}` }} />
+            {monthsList.map((m) => (
+              <DropdownItem key={m.key} active={monthFilter === m.key} accent={C.forest} onClick={() => setMonthFilter(m.key)}>{m.label}</DropdownItem>
+            ))}
+          </Dropdown>
+        }
+      />
+
+      <div className="inline-flex rounded-lg p-0.5 mb-4" style={{ backgroundColor: C.paper, border: `1px solid ${C.hairline}` }}>
+        {[{ v: "both", label: "Both" }, { v: "cash", label: "Cash" }, { v: "bank", label: "Bank" }].map((opt) => (
+          <button key={opt.v} onClick={() => setModeFilter(opt.v)}
+            className="f-body text-[12px] font-semibold px-3 py-1.5 rounded-md transition-colors"
+            style={modeFilter === opt.v ? { backgroundColor: C.ink, color: C.paper } : { color: C.inkMuted }}>{opt.label}</button>
         ))}
       </div>
+
+      {!top5.length ? (
+        <p className="f-body text-[13px]" style={{ color: C.inkMuted }}>No collections match this filter yet.</p>
+      ) : (
+        <div className="flex flex-col gap-3.5">
+          {top5.map((v, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <span className="f-display text-[13px] font-semibold flex items-center justify-center shrink-0"
+                style={{ width: 24, height: 24, borderRadius: 8, backgroundColor: i === 0 ? C.forest : C.paper, color: i === 0 ? C.paper : C.inkMuted, border: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
+                {i === 0 ? <Trophy size={12} /> : i + 1}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="f-body text-[13.5px] font-semibold truncate" style={{ color: C.ink }}>{v.name}</span>
+                  <span className="f-mono text-[12.5px] font-semibold ml-2 shrink-0" style={{ color: C.forest }}>{inr(v.total)}</span>
+                </div>
+                <div className="rounded-full overflow-hidden flex" style={{ height: 5, backgroundColor: C.hairline }}>
+                  <div style={{ width: `${Math.max(0, (v.cash / max) * 100)}%`, backgroundColor: C.amber }} />
+                  <div style={{ width: `${Math.max(0, (v.bank / max) * 100)}%`, backgroundColor: C.teal }} />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {others.length > 0 && (
+        <div className="mt-4 pt-3" style={{ borderTop: `1px solid ${C.hairline}` }}>
+          <button onClick={() => setShowOthers((v) => !v)} className="w-full flex items-center justify-between">
+            <span className="f-body text-[13px] font-semibold" style={{ color: C.inkMuted }}>
+              Other vendors ({others.length})
+            </span>
+            <ChevronDown size={16} color={C.inkMuted} style={{ transform: showOthers ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.15s" }} />
+          </button>
+          {showOthers && (
+            <div className="flex flex-col mt-2">
+              {others.map((v, i) => (
+                <div key={i} className="flex items-center justify-between py-2">
+                  <span className="f-body text-[13px] truncate" style={{ color: C.ink }}>{v.name}</span>
+                  <span className="f-mono text-[12px]" style={{ color: C.inkMuted }}>{inr(v.total)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }
 
 /* ---------------------------------------------------------------
-   HEADER — live current date + quick stat strip
+   HEADER — live date, Pending stat, revenue stat with period dropdown
 --------------------------------------------------------------- */
-function Header({ orders, monthTotal, companyName }) {
-  const currentDate = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
-  const overdueCount = orders.filter((o) => o.days >= 15).length;
+const HEADER_PERIODS = [
+  { key: "week", label: "This Week" },
+  { key: "month", label: "This Month" },
+  { key: "year", label: "This Year" },
+];
+
+function Header({ orders, allDays, companyName }) {
+  const [currentDate, setCurrentDate] = useState("");
+  const [periodKey, setPeriodKey] = useState("month");
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    setCurrentDate(new Date().toLocaleDateString("en-IN", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }));
+  }, []);
+
+  const now = new Date();
+  let periodTotal = 0;
+  if (periodKey === "week") {
+    const cutoff = new Date(now);
+    cutoff.setDate(cutoff.getDate() - 6);
+    cutoff.setHours(0, 0, 0, 0);
+    periodTotal = allDays.filter((d) => d.dateObj >= cutoff).reduce((s, d) => s + d.cash + d.bank, 0);
+  } else if (periodKey === "year") {
+    periodTotal = allDays.filter((d) => d.dateObj.getFullYear() === now.getFullYear()).reduce((s, d) => s + d.cash + d.bank, 0);
+  } else {
+    const mk = monthKeyOfDate(now);
+    periodTotal = allDays.filter((d) => monthKeyOfDate(d.dateObj) === mk).reduce((s, d) => s + d.cash + d.bank, 0);
+  }
+  const periodLabel = HEADER_PERIODS.find((p) => p.key === periodKey)?.label || "This Month";
 
   return (
     <div className="px-5 pt-6 pb-4">
@@ -441,35 +529,46 @@ function Header({ orders, monthTotal, companyName }) {
           <div className="f-body text-[11px] mt-1" style={{ color: C.inkMuted }}>{currentDate}</div>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-2.5">
-        <StatChip label="Pending" value={orders.length} tone={C.ink} />
-        <StatChip label="Overdue" value={overdueCount} tone={C.brick} />
-        <StatChip label="This Month" value={`₹${Math.round(monthTotal / 1000)}k`} tone={C.forest} icon={<IndianRupee size={11} />} />
+
+      <div className="grid grid-cols-2 gap-2.5">
+        <div className="rounded-xl px-3 py-2.5" style={{ backgroundColor: C.panel, border: `1px solid ${C.hairline}` }}>
+          <div className="f-body text-[10px] uppercase tracking-wide font-semibold mb-0.5" style={{ color: C.inkMuted }}>Pending</div>
+          <div className="f-mono text-[17px] font-semibold" style={{ color: C.ink }}>{orders.length}</div>
+        </div>
+
+        <div className="relative">
+          <button onClick={() => setMenuOpen((v) => !v)} className="w-full text-left rounded-xl px-3 py-2.5"
+            style={{ backgroundColor: C.panel, border: `1px solid ${C.hairline}` }}>
+            <div className="f-body text-[10px] uppercase tracking-wide font-semibold mb-0.5 flex items-center gap-1" style={{ color: C.inkMuted }}>
+              {periodLabel}<ChevronDown size={10} />
+            </div>
+            <div className="f-mono text-[17px] font-semibold" style={{ color: C.forest }}>{inr(periodTotal)}</div>
+          </button>
+          {menuOpen && (
+            <div className="absolute right-0 mt-1.5 rounded-xl overflow-hidden shadow-lg z-20 f-body"
+              style={{ backgroundColor: C.panel, border: `1px solid ${C.hairline}`, minWidth: 140 }}
+              onClick={() => setMenuOpen(false)}>
+              {HEADER_PERIODS.map((p) => (
+                <DropdownItem key={p.key} active={periodKey === p.key} accent={C.forest} onClick={() => setPeriodKey(p.key)}>{p.label}</DropdownItem>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function StatChip({ label, value, tone, icon }) {
-  return (
-    <div className="rounded-xl px-3 py-2.5" style={{ backgroundColor: C.panel, border: `1px solid ${C.hairline}` }}>
-      <div className="f-body text-[10px] uppercase tracking-wide font-semibold mb-0.5" style={{ color: C.inkMuted }}>{label}</div>
-      <div className="f-mono text-[17px] font-semibold flex items-center gap-0.5" style={{ color: tone }}>{icon}{value}</div>
-    </div>
-  );
-}
-
 /* ---------------------------------------------------------------
-   ROOT — fetches from Google Sheets (via SheetDB) on load
+   ROOT
 --------------------------------------------------------------- */
 export default function FurnitureDashboard() {
-  const [status, setStatus] = useState("loading"); // loading | ready | error
+  const [status, setStatus] = useState("loading");
   const [orders, setOrders] = useState([]);
   const [completedOrders, setCompletedOrders] = useState([]);
+  const [allDays, setAllDays] = useState([]);
   const [monthsList, setMonthsList] = useState([]);
-  const [monthDataMap, setMonthDataMap] = useState({});
-  const [topVendors, setTopVendors] = useState([]);
-  const [currentMonthTotal, setCurrentMonthTotal] = useState(0);
+  const [collectionRows, setCollectionRows] = useState([]);
 
   useEffect(() => {
     async function load() {
@@ -483,96 +582,76 @@ export default function FurnitureDashboard() {
           fetch(`${SHEETDB_URL}?sheet=Collections`).then((r) => r.json()),
         ]);
 
-        // ---- Orders tab: vendor, model, orderdate, status, completeddate ----
+        // ---- Orders ----
         const ordersNormalized = ordersRaw.map(normalizeRow).filter((r) => r.vendor);
-
         const isDone = (r) => {
           const s = String(r.status || "").toLowerCase();
           return s.includes("complete") || s.includes("done");
         };
 
-        const ordersClean = ordersNormalized
-          .filter((r) => !isDone(r))
-          .map((r) => ({ vendor: r.vendor, model: r.model, days: daysBetween(r.orderdate) }))
-          .sort((a, b) => b.days - a.days);
-        setOrders(ordersClean);
+        setOrders(
+          ordersNormalized.filter((r) => !isDone(r))
+            .map((r) => ({ vendor: r.vendor, model: r.model, days: daysBetween(r.orderdate) }))
+            .sort((a, b) => b.days - a.days)
+        );
 
-        const completedClean = ordersNormalized
-          .filter(isDone)
-          .map((r) => {
-            const cd = new Date(r.completeddate);
-            return {
-              vendor: r.vendor,
-              model: r.model,
-              sortKey: isNaN(cd) ? 0 : cd.getTime(),
-              completedLabel: isNaN(cd)
-                ? "date not set"
-                : cd.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
-            };
-          })
-          .sort((a, b) => b.sortKey - a.sortKey);
-        setCompletedOrders(completedClean);
+        setCompletedOrders(
+          ordersNormalized.filter(isDone)
+            .map((r) => {
+              const cd = parseSheetDate(r.completeddate);
+              return {
+                vendor: r.vendor, model: r.model,
+                sortKey: isNaN(cd) ? 0 : cd.getTime(),
+                completedLabel: isNaN(cd) ? "date not set" : cd.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
+              };
+            })
+            .sort((a, b) => b.sortKey - a.sortKey)
+        );
 
-        // ---- Collections tab: date, amount, mode, party ----
-        const rows = collectionsRaw
+        // ---- Collections ----
+        const txns = collectionsRaw
           .map(normalizeRow)
           .filter((r) => r.date && r.amount)
           .map((r) => {
-            const d = new Date(r.date);
+            const d = parseSheetDate(r.date);
             const modeStr = String(r.mode || "").toLowerCase();
-            const isCash = modeStr.includes("cash");
             return {
               dateObj: d,
-              monthKey: monthKeyOf(r.date),
-              label: isNaN(d) ? r.date : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }),
-              amount: Number(r.amount) || 0,
-              isCash,
+              monthKey: monthKeyOfDate(d),
+              amount: toNumber(r.amount),
+              isCash: modeStr.includes("cash"),
               party: r.party || "Unknown",
             };
           })
-          .filter((r) => r.monthKey);
+          .filter((r) => !isNaN(r.dateObj) && r.monthKey);
 
-        // group into per-day cash/bank totals, per month
-        const grouped = {};
-        rows.forEach((r) => {
-          if (!grouped[r.monthKey]) grouped[r.monthKey] = {};
+        setCollectionRows(txns);
+
+        const dayMap = {};
+        txns.forEach((r) => {
           const dayKey = r.dateObj.toDateString();
-          if (!grouped[r.monthKey][dayKey]) {
-            grouped[r.monthKey][dayKey] = { sortKey: r.dateObj.getTime(), label: r.label, cash: 0, bank: 0 };
+          if (!dayMap[dayKey]) {
+            dayMap[dayKey] = {
+              sortKey: r.dateObj.getTime(),
+              dateObj: r.dateObj,
+              label: r.dateObj.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }),
+              cash: 0,
+              bank: 0,
+            };
           }
-          if (r.isCash) grouped[r.monthKey][dayKey].cash += r.amount;
-          else grouped[r.monthKey][dayKey].bank += r.amount;
+          if (r.isCash) dayMap[dayKey].cash += r.amount;
+          else dayMap[dayKey].bank += r.amount;
         });
 
-        const map = {};
-        Object.entries(grouped).forEach(([key, dayMap]) => {
-          const dayRows = Object.values(dayMap).sort((a, b) => a.sortKey - b.sortKey);
-          dayRows.forEach((row, i) => {
-            const win = dayRows.slice(Math.max(0, i - 2), i + 1);
-            row.trend = Math.round(win.reduce((s, r) => s + r.cash + r.bank, 0) / win.length);
-          });
-          map[key] = dayRows;
+        const daysSorted = Object.values(dayMap).sort((a, b) => a.sortKey - b.sortKey);
+        daysSorted.forEach((row, i) => {
+          const win = daysSorted.slice(Math.max(0, i - 2), i + 1);
+          row.trend = Math.round(win.reduce((s, r) => s + r.cash + r.bank, 0) / win.length);
         });
+        setAllDays(daysSorted);
 
-        const list = Object.keys(map).sort().map((key) => ({ key, label: monthLabelOf(key) }));
-        setMonthDataMap(map);
-        setMonthsList(list);
-
-        // current calendar month total, for the header stat chip
-        const thisMonthKey = monthKeyOf(new Date().toISOString());
-        const thisMonthRows = map[thisMonthKey] || [];
-        setCurrentMonthTotal(thisMonthRows.reduce((s, r) => s + r.cash + r.bank, 0));
-
-        // ---- Top 5 vendors by total amount (all-time, across all rows) ----
-        const byParty = {};
-        rows.forEach((r) => {
-          byParty[r.party] = (byParty[r.party] || 0) + r.amount;
-        });
-        const ranked = Object.entries(byParty)
-          .map(([name, total]) => ({ name, total }))
-          .sort((a, b) => b.total - a.total)
-          .slice(0, 5);
-        setTopVendors(ranked);
+        const monthKeys = Array.from(new Set(daysSorted.map((d) => monthKeyOfDate(d.dateObj)))).sort();
+        setMonthsList(monthKeys.map((key) => ({ key, label: monthLabelOf(key) })));
 
         setStatus("ready");
       } catch (e) {
@@ -587,22 +666,20 @@ export default function FurnitureDashboard() {
       <FontStyles />
       <div className="relative w-full max-w-[430px] sm:my-6 sm:rounded-[2.25rem] sm:shadow-2xl overflow-hidden" style={{ backgroundColor: C.paper }}>
         <div className="h-screen sm:h-[860px] overflow-y-auto" style={{ paddingBottom: 32 }}>
-          <Header orders={orders} monthTotal={currentMonthTotal} companyName="Pooja Enterprises" />
+          <Header orders={orders} allDays={allDays} companyName="Pooja Enterprises" />
           <div className="px-4">
-            {status === "loading" && (
-              <div className="f-body text-[13px] text-center py-10" style={{ color: C.inkMuted }}>Loading your data…</div>
-            )}
+            {status === "loading" && <div className="f-body text-[13px] text-center py-10" style={{ color: C.inkMuted }}>Loading your data…</div>}
             {status === "error" && (
               <div className="rounded-2xl p-5 mb-4 f-body text-[13px]" style={{ backgroundColor: C.brickSoft, color: C.brick }}>
-                Couldn't load data. Make sure SHEETDB_URL at the top of this file is your real SheetDB link, and that your sheet has tabs named exactly "Orders" and "Collections".
+                Couldn't load data. Make sure SHEETDB_URL is your real SheetDB link, and your sheet has tabs named exactly "Orders" and "Collections".
               </div>
             )}
             {status === "ready" && (
               <>
                 <PendingOrders orders={orders} />
                 <CompletedOrders completed={completedOrders} />
-                <CollectionEngine monthsList={monthsList} monthDataMap={monthDataMap} />
-                <TopVendors vendors={topVendors} />
+                <CollectionEngine allDays={allDays} monthsList={monthsList} />
+                <TopVendors rows={collectionRows} monthsList={monthsList} />
               </>
             )}
           </div>
