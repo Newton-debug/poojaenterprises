@@ -473,7 +473,7 @@ export default function FurnitureDashboard() {
 
   useEffect(() => {
     async function load() {
-      if (!SHEETDB_URL || SHEETDB_URL.includes("https://sheetdb.io/api/v1/2lhcimkjxmeqw")) {
+      if (!SHEETDB_URL || SHEETDB_URL.includes("PASTE_YOUR_SHEETDB_URL")) {
         setStatus("error");
         return;
       }
